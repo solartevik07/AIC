@@ -109,6 +109,35 @@ class StatisticsView(ctk.CTkFrame):
         ctk.CTkButton(r5, text="Показати", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
                       width=100, command=self._q5).pack(side="left", padx=8)
 
+        s6 = section("6. Виручка касира за категоріями товарів (групування)")
+        r6 = ctk.CTkFrame(s6, fg_color="transparent"); r6.pack(fill="x", padx=12, pady=4)
+        cashiers6 = DB.fetchall(
+            "SELECT id_employee,empl_surname FROM Employee WHERE empl_role='Касир'")
+        c6_vals = [f"{r['id_employee']} - {r['empl_surname']}" for r in cashiers6]
+        self._s6_cashier = tk.StringVar(value=c6_vals[0] if c6_vals else "")
+        ctk.CTkComboBox(r6, variable=self._s6_cashier, values=c6_vals, width=220,
+                        fg_color=SURFACE, border_color=PRIMARY, text_color=TEXT,
+                        button_color=PRIMARY, dropdown_fg_color=SURFACE2).pack(side="left", padx=4)
+        ctk.CTkLabel(r6, text="виручка >", text_color=TEXT_DIM, font=FONT_SM).pack(side="left", padx=4)
+        self._s6_min = tk.StringVar(value="0")
+        ctk.CTkEntry(r6, textvariable=self._s6_min, width=90,
+                     fg_color=SURFACE, border_color=PRIMARY, text_color=TEXT).pack(side="left", padx=2)
+        ctk.CTkLabel(r6, text="₴", text_color=TEXT_DIM, font=FONT_SM).pack(side="left", padx=2)
+        ctk.CTkButton(r6, text="Порахувати", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
+                      width=110, command=self._q6).pack(side="left", padx=8)
+
+        s7 = section("7. Касири, які продали всі товари заданої категорії (подвійне заперечення)")
+        r7 = ctk.CTkFrame(s7, fg_color="transparent"); r7.pack(fill="x", padx=12, pady=4)
+        cats7 = DB.fetchall(
+            "SELECT category_number,category_name FROM Category ORDER BY category_name")
+        cat7_vals = [f"{r['category_number']} - {r['category_name']}" for r in cats7]
+        self._s7_cat = tk.StringVar(value=cat7_vals[0] if cat7_vals else "")
+        ctk.CTkComboBox(r7, variable=self._s7_cat, values=cat7_vals, width=260,
+                        fg_color=SURFACE, border_color=PRIMARY, text_color=TEXT,
+                        button_color=PRIMARY, dropdown_fg_color=SURFACE2).pack(side="left", padx=4)
+        ctk.CTkButton(r7, text="Знайти", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
+                      width=110, command=self._q7).pack(side="left", padx=8)
+
         self._result_frame.pack(fill="both", expand=True, padx=PAD, pady=(0, PAD))
         rf_top = ctk.CTkFrame(self._result_frame, fg_color="transparent")
         rf_top.pack(fill="x", padx=8, pady=4)
@@ -199,6 +228,54 @@ class StatisticsView(ctk.CTkFrame):
         self._show(f"Клієнти зі знижкою {pct}%",
                    [("s", "Прізвище", 160), ("n", "Ім'я", 120),
                     ("p", "Телефон", 130), ("pct", "Знижка %", 80)], rows)
+
+    def _q6(self):
+        cid = self._s6_cashier.get().split(" - ")[0]
+        try:
+            min_rev = float(self._s6_min.get().replace(",", "."))
+        except ValueError:
+            messagebox.showwarning("Увага", "Поріг виручки має бути числом", parent=self); return
+        rows = DB.fetchall(
+            "SELECT cat.category_name AS category, "
+            "       SUM(s.product_number) AS qty, "
+            "       SUM(s.product_number * s.selling_price) AS revenue "
+            "FROM Sale s "
+            "     JOIN [Check] c        ON s.check_number = c.check_number "
+            "     JOIN Store_Product sp ON s.UPC = sp.UPC "
+            "     JOIN Product p        ON sp.id_product = p.id_product "
+            "     JOIN Category cat     ON p.category_number = cat.category_number "
+            "WHERE c.id_employee = ? "
+            "GROUP BY cat.category_number, cat.category_name "
+            "HAVING SUM(s.product_number * s.selling_price) > ? "
+            "ORDER BY revenue DESC",
+            (cid, min_rev))
+        data = [[r["category"], str(r["qty"]) + " од.", f"{r['revenue']:.2f} ₴"] for r in rows]
+        self._show(f"Виручка касира {cid} за категоріями (понад {min_rev:.2f} ₴)",
+                   [("category", "Категорія", 240),
+                    ("qty", "Продано одиниць", 160),
+                    ("revenue", "Виручка", 160)], data)
+
+    def _q7(self):
+        cat_num = self._s7_cat.get().split(" - ")[0]
+        cat_name = self._s7_cat.get().split(" - ", 1)[-1]
+        rows = DB.fetchall(
+            "SELECT e.id_employee AS id, e.empl_surname AS surname, e.empl_name AS name "
+            "FROM Employee e "
+            "WHERE e.empl_role = 'Касир' "
+            "  AND NOT EXISTS ( "
+            "        SELECT * FROM Product p "
+            "        WHERE p.category_number = ? "
+            "          AND NOT EXISTS ( "
+            "                SELECT * FROM [Check] c "
+            "                     JOIN Sale s           ON c.check_number = s.check_number "
+            "                     JOIN Store_Product sp ON s.UPC = sp.UPC "
+            "                WHERE c.id_employee = e.id_employee "
+            "                  AND sp.id_product = p.id_product ) ) "
+            "ORDER BY e.empl_surname",
+            (cat_num,))
+        self._show(f"Касири, які продали всі товари категорії «{cat_name}»",
+                   [("id", "ID", 90), ("surname", "Прізвище", 180),
+                    ("name", "Ім'я", 180)], rows)
 
     def _export(self):
         if not self._result_rows:
