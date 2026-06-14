@@ -109,6 +109,30 @@ class StatisticsView(ctk.CTkFrame):
         ctk.CTkButton(r5, text="Показати", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
                       width=100, command=self._q5).pack(side="left", padx=8)
 
+        #Складний запит 1: багатотабличний (3 таблиці) з групуванням, параметричний
+        s6 = section("6. Постійні клієнти з сумою покупок понад задану")
+        r6 = ctk.CTkFrame(s6, fg_color="transparent"); r6.pack(fill="x", padx=12, pady=4)
+        ctk.CTkLabel(r6, text="сума покупок >", text_color=TEXT_DIM, font=FONT_SM).pack(side="left", padx=4)
+        self._s6_min = tk.StringVar(value="0")
+        ctk.CTkEntry(r6, textvariable=self._s6_min, width=100,
+                     fg_color=SURFACE, border_color=PRIMARY, text_color=TEXT).pack(side="left", padx=2)
+        ctk.CTkLabel(r6, text="₴", text_color=TEXT_DIM, font=FONT_SM).pack(side="left", padx=2)
+        ctk.CTkButton(r6, text="Показати", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
+                      width=110, command=self._q6).pack(side="left", padx=8)
+
+        #Складний запит 2: багатотабличний (3 таблиці) з подвійним запереченням, параметричний
+        s7 = section("7. Касири, які обслужили ВСІХ клієнтів із заданою знижкою")
+        r7 = ctk.CTkFrame(s7, fg_color="transparent"); r7.pack(fill="x", padx=12, pady=4)
+        pcts7 = sorted(set(str(r["percent"]) for r in
+                           DB.fetchall("SELECT DISTINCT percent FROM Customer_Card")))
+        self._s7_pct = tk.StringVar(value=pcts7[0] if pcts7 else "5")
+        ctk.CTkComboBox(r7, variable=self._s7_pct, values=pcts7, width=100,
+                        fg_color=SURFACE, border_color=PRIMARY, text_color=TEXT,
+                        button_color=PRIMARY, dropdown_fg_color=SURFACE2).pack(side="left", padx=4)
+        ctk.CTkLabel(r7, text="% знижки", text_color=TEXT_DIM, font=FONT_SM).pack(side="left", padx=4)
+        ctk.CTkButton(r7, text="Знайти", fg_color=PRIMARY, hover_color=PRIMARY_DARK,
+                      width=110, command=self._q7).pack(side="left", padx=8)
+
         self._result_frame.pack(fill="both", expand=True, padx=PAD, pady=(0, PAD))
         rf_top = ctk.CTkFrame(self._result_frame, fg_color="transparent")
         rf_top.pack(fill="x", padx=8, pady=4)
@@ -199,6 +223,46 @@ class StatisticsView(ctk.CTkFrame):
         self._show(f"Клієнти зі знижкою {pct}%",
                    [("s", "Прізвище", 160), ("n", "Ім'я", 120),
                     ("p", "Телефон", 130), ("pct", "Знижка %", 80)], rows)
+
+    def _q6(self):
+        try:
+            min_total = float(self._s6_min.get().replace(",", "."))
+        except ValueError:
+            messagebox.showwarning("Увага", "Поріг суми має бути числом", parent=self); return
+        rows = DB.fetchall(
+            "SELECT cc.cust_surname AS surname, cc.cust_name AS name, "
+            "       COUNT(DISTINCT c.check_number) AS checks, "
+            "       SUM(s.product_number * s.selling_price) AS total "
+            "FROM Customer_Card cc "
+            "     JOIN [Check] c ON cc.card_number = c.card_number "
+            "     JOIN Sale s    ON c.check_number = s.check_number "
+            "GROUP BY cc.card_number, cc.cust_surname, cc.cust_name "
+            "HAVING SUM(s.product_number * s.selling_price) > ? "
+            "ORDER BY total DESC",
+            (min_total,))
+        data = [[r["surname"], r["name"], str(r["checks"]), f"{r['total']:.2f} ₴"] for r in rows]
+        self._show(f"Клієнти з сумою покупок понад {min_total:.2f} ₴",
+                   [("surname", "Прізвище", 180), ("name", "Ім'я", 160),
+                    ("checks", "Кількість чеків", 140), ("total", "Сума покупок", 160)], data)
+
+    def _q7(self):
+        pct = int(self._s7_pct.get())
+        rows = DB.fetchall(
+            "SELECT e.id_employee AS id, e.empl_surname AS surname, e.empl_name AS name "
+            "FROM Employee e "
+            "WHERE e.empl_role = 'Касир' "
+            "  AND NOT EXISTS ( "
+            "        SELECT * FROM Customer_Card cc "
+            "        WHERE cc.percent = ? "
+            "          AND NOT EXISTS ( "
+            "                SELECT * FROM [Check] c "
+            "                WHERE c.id_employee = e.id_employee "
+            "                  AND c.card_number = cc.card_number ) ) "
+            "ORDER BY e.empl_surname",
+            (pct,))
+        self._show(f"Касири, які обслужили всіх клієнтів зі знижкою {pct}%",
+                   [("id", "ID", 90), ("surname", "Прізвище", 180),
+                    ("name", "Ім'я", 180)], rows)
 
     def _export(self):
         if not self._result_rows:
